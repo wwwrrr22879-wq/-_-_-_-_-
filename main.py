@@ -10,7 +10,7 @@ import os
 import random
 
 # 🔐 Твои данные
-TOKEN = "ВАШ_ТОКЕН_ТУТ"
+TOKEN = "8398382607:AAFYlAxCH0SuJBovS3v9FMxiphT06VIVUjM"
 ADMIN_CHAT_ID = -1003120877184
 OWNER_ID = 1470389051
 
