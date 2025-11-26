@@ -4,25 +4,22 @@ import json
 from datetime import datetime, time
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
+from flask import Flask
+import threading
 import os
 
-# ===================== ВАШІ ДАНІ =====================
-TOKEN = "8398382607:AAFYlAxCH0SuJBovS3v9FMxiphT06VIVUjM"  # <-- встав свій токен
-ADMIN_CHAT_ID =  8398382607 # <-- твій ID або групи адміністрації
+# 🔐 Ваші дані
+TOKEN = "8398382607:AAFYlAxCH0SuJBovS3v9FMxiphT06VIVUjM"
+ADMIN_CHAT_ID = 8398382607
 OWNER_ID = 1470389051
 DATA_FILE = "rewards_db.json"
-# ======================================================
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# 💬 Відповідність повідомлення адміна ↔ користувач
 reply_map = {}
-
-# 🚫 Заблоковані користувачі
 banned_users = set()
 
-# 🏆 Нагороди
 if os.path.exists(DATA_FILE):
     with open(DATA_FILE, "r") as f:
         rewards_db = json.load(f)
@@ -39,40 +36,38 @@ def check_rewards(user_id, message_time=None):
     msg_count = user["messages"]
     new_rewards = []
 
-    # Первое сообщение
-    if msg_count == 1 and "🏅 Первое сообщение" not in user["rewards"]:
-        user["rewards"].append("🏅 Первое сообщение")
-        new_rewards.append("🏅 Первое сообщение")
-
-    # За количество сообщений
+    # За кількість повідомлень
     milestones = {
+        1: "🏅 Первое сообщение",
         10: "🎉 10 сообщений",
         25: "🥳 25 сообщений",
         50: "🎊 50 сообщений",
         100: "🏆 100 сообщений",
         250: "💎 250 сообщений",
         500: "💎💎 500 сообщений",
-        1000: "🌟 1000 сообщений",
-        2500: "🌟🌟 2500 сообщений",
-        5000: "🌟🌟🌟 5000 сообщений"
+        1000: "🌟 1000 сообщений"
     }
     if msg_count in milestones and milestones[msg_count] not in user["rewards"]:
         user["rewards"].append(milestones[msg_count])
         new_rewards.append(milestones[msg_count])
 
-    # Ночная смена
+    # Нічна зміна
     if message_time:
         if time(22,0) <= message_time.time() or message_time.time() <= time(8,0):
             if "🌙 Ночная смена" not in user["rewards"]:
                 user["rewards"].append("🌙 Ночная смена")
                 new_rewards.append("🌙 Ночная смена")
 
-        # Специальные часы
+        # Спеціальні години
         special_times = [
             ("10:23", "⏰ Написал в 10:23"),
-            ("00:00", "🌌 Сообщение в полночь"),
+            ("00:00", "🌌 Полночь сообщение"),
             ("12:34", "🕐 Время 12:34"),
-            ("03:21", "🌌 Тайная ночная пора")
+            ("03:14", "🥧 Пи-сообщение"),
+            ("18:18", "💌 Любовное сообщение"),
+            ("11:11", "💖 Желание на 11:11"),
+            ("20:20", "🎯 Удачное время"),
+            ("07:07", "🍀 Счастливое число 7")
         ]
         for t_str, reward_name in special_times:
             t_hour, t_min = map(int, t_str.split(":"))
@@ -81,24 +76,41 @@ def check_rewards(user_id, message_time=None):
                     user["rewards"].append(reward_name)
                     new_rewards.append(reward_name)
 
+    # Додаткові секретні нагороди
+    secret_rewards = {
+        7: "👑 Тайный король сообщений",
+        77: "👑 Король сообщений",
+        333: "💫 Мастер сообщений",
+        555: "🔥 Огненный писатель",
+        888: "💎 Богатырь чата",
+        999: "🌟 Легенда сообщений",
+        123: "🎁 Удачное сообщение 123",
+        321: "🎀 Виновник радости 321",
+        7777: "🏅 Супермаг сообщений",
+        2025: "🌟 Годовой рекорд 2025"
+    }
+    for k, v in secret_rewards.items():
+        if msg_count % k == 0 and v not in user["rewards"]:
+            user["rewards"].append(v)
+            new_rewards.append(v)
+
     save_db()
     return new_rewards
 
-# ===================== Клавиатура =====================
 def main_keyboard():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add("Мои награды")
     return kb
 
-# ===================== Команды =====================
 @dp.message(Command("start"))
 async def start_command(message: types.Message):
     if message.from_user.id in banned_users:
         return
     await message.answer(
-        "🌸 Привет! Я — бот *Шёпот сердец 💌*\n"
-        "Напиши своё сообщение — я передам его администрации.\n"
-        "Они обязательно ответят тебе с теплом ☀️",
+        "🌸 Привет, дружок!\n\n"
+        "Я — бот *Шепот сердец 💌*\n"
+        "Напиши своё сообщение — и я передам его администраторам.\n"
+        "Они обязательно ответят тебе с лучиком тепла ☀️",
         parse_mode="Markdown",
         reply_markup=main_keyboard()
     )
@@ -113,14 +125,14 @@ async def show_rewards(message: types.Message):
     text = "🏆 Ваши награды:\n" + "\n".join(user["rewards"])
     await message.answer(text)
 
-# ===================== Бан/Разбан =====================
+# --- Блокування ---
 @dp.message(Command("ban"))
 async def ban_command(message: types.Message):
     if message.from_user.id != OWNER_ID:
         await message.reply("❌ Только владелец может банить.")
         return
     if not message.reply_to_message:
-        await message.reply("⚠️ Ответьте на сообщение пользователя, которого хотите забанить.")
+        await message.reply("⚠️ Ответь на сообщение пользователя, которого хочешь забанить.")
         return
     user_id = reply_map.get(message.reply_to_message.message_id)
     if not user_id:
@@ -135,41 +147,41 @@ async def unban_command(message: types.Message):
         await message.reply("❌ Только владелец может разбанить.")
         return
     if not message.reply_to_message:
-        await message.reply("⚠️ Ответьте на сообщение пользователя, которого хотите разбанить.")
+        await message.reply("⚠️ Ответь на сообщение пользователя, которого хочешь разбанить.")
         return
     user_id = reply_map.get(message.reply_to_message.message_id)
     if not user_id:
         await message.reply("⚠️ Не удалось определить пользователя.")
         return
     banned_users.discard(user_id)
-    await message.reply(f"✅ Пользователь {user_id} разбанен.")
+    await message.reply(f"✅ Пользователь {user_id} разблокирован.")
 
 @dp.message(Command("banned"))
 async def banned_command(message: types.Message):
     if message.from_user.id != OWNER_ID:
-        await message.reply("❌ Только владелец может просматривать заблокированных.")
+        await message.reply("❌ Только владелец может смотреть заблокированных.")
         return
     if banned_users:
         await message.reply("🚫 Заблокированные пользователи:\n" + "\n".join(map(str, banned_users)))
     else:
-        await message.reply("✅ Заблокированных пользователей нет.")
+        await message.reply("✅ Нет заблокированных пользователей.")
 
-# ===================== Пересылка сообщений =====================
 @dp.message()
 async def handle_messages(message: types.Message):
     user_id = message.from_user.id
     if user_id in banned_users:
         return
 
-    # Награды
+    # Нагороди
     check_rewards(user_id, datetime.now())
 
-    # Отправка админу
+    # Пересилання адміну
     if message.chat.id != ADMIN_CHAT_ID:
         username = f"@{message.from_user.username}" if message.from_user.username else "без_юзернейма"
         text = f"💬 Сообщение от {username} (ID: {user_id}):\n\n"
         if message.text:
-            sent = await bot.send_message(ADMIN_CHAT_ID, text + message.text)
+            text += message.text
+            sent = await bot.send_message(ADMIN_CHAT_ID, text)
         elif message.photo:
             sent = await bot.send_photo(ADMIN_CHAT_ID, message.photo[-1].file_id, caption=text)
         elif message.video:
@@ -182,7 +194,7 @@ async def handle_messages(message: types.Message):
             sent = await bot.send_message(ADMIN_CHAT_ID, text + "[неподдерживаемый тип]")
         reply_map[sent.message_id] = user_id
 
-    # Ответ администратора
+    # Адмін відповідає
     elif message.chat.id == ADMIN_CHAT_ID:
         if message.reply_to_message and message.reply_to_message.message_id in reply_map:
             user_id = reply_map[message.reply_to_message.message_id]
@@ -202,6 +214,19 @@ async def handle_messages(message: types.Message):
             except:
                 await bot.send_message(ADMIN_CHAT_ID, f"⚠️ Пользователь {user_id} заблокировал бота.")
 
-# ===================== Запуск бота =====================
+# --- Flask Keep Alive ---
+app = Flask("")
+
+@app.route("/")
+def home():
+    return "Bot is alive!"
+
+def run():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
+
+threading.Thread(target=run).start()
+
+# --- Запуск бота ---
 if __name__ == "__main__":
     asyncio.run(dp.start_polling(bot))
