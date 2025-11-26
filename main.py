@@ -8,7 +8,7 @@ from datetime import datetime
 
 # ------------------ Твои данные ------------------
 TOKEN = "8398382607:AAFYlAxCH0SuJBovS3v9FMxiphT06VIVUjM"
-ADMIN_CHAT_ID = -1003120877184  # сюда пересылаем сообщения
+ADMIN_CHAT_ID = 3205863933  # сюда пересылаем сообщения
 OWNER_ID = 1470389051
 
 bot = Bot(token=TOKEN)
