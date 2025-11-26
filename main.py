@@ -54,7 +54,10 @@ def check_rewards(user_id, message_time=None):
         100: "🏆 100 сообщений",
         250: "💎 250 сообщений",
         500: "💎💎 500 сообщений",
-        1000: "🌟 1000 сообщений"
+        1000: "🌟 1000 сообщений",
+        2000: "🚀 2000 сообщений",
+        5000: "🌈 5000 сообщений",
+        10000: "💫 10000 сообщений"
     }
     if msg_count in milestones and milestones[msg_count] not in user["rewards"]:
         user["rewards"].append(milestones[msg_count])
@@ -72,8 +75,9 @@ def check_rewards(user_id, message_time=None):
             ("10:23", "⏰ Написал в 10:23"),
             ("00:00", "🌌 Полночь сообщение"),
             ("12:34", "🕐 Время 12:34"),
-            ("07:07", "☀️ Доброе утро 7:07"),
-            ("21:21", "🌆 Вечерний час 21:21"),
+            ("03:14", "🥧 Pi Time 3:14"),
+            ("20:20", "🕗 Двойная двадцатка 20:20"),
+            ("18:18", "🎯 Время 18:18")
         ]
         for t_str, reward_name in special_times:
             t_hour, t_min = map(int, t_str.split(":"))
@@ -87,8 +91,10 @@ def check_rewards(user_id, message_time=None):
 
 # --- Клавіатура ---
 def main_keyboard():
-    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(types.KeyboardButton("Мои награды"))
+    kb = types.ReplyKeyboardMarkup(
+        keyboard=[[types.KeyboardButton(text="Мои награды")]],  # двовимірний список кнопок
+        resize_keyboard=True
+    )
     return kb
 
 # --- Команди ---
@@ -97,14 +103,16 @@ async def start_command(message: types.Message):
     if message.from_user.id in banned_users:
         return
     await message.answer(
-        "🌸 Привет! Я — бот *Шепот сердец 💌*\n"
+        "🌸 Привет, солнышко!\n\n"
+        "Я — бот *Шепот сердец 💌*\n"
         "Напиши своё сообщение — и я передам его администраторам.\n"
-        "Они обязательно ответят тебе с лучиком тепла ☀️",
+        "Они обязательно ответят тебе с лучиком тепла ☀️\n\n"
+        "Можно ли пообщаться?",
         parse_mode="Markdown",
         reply_markup=main_keyboard()
     )
 
-# --- Перегляд нагород ---
+# --- Показ нагород ---
 @dp.message(lambda m: m.text == "Мои награды")
 async def show_rewards(message: types.Message):
     user_id = str(message.from_user.id)
@@ -115,7 +123,7 @@ async def show_rewards(message: types.Message):
     text = "🏆 Ваши награды:\n" + "\n".join(user["rewards"])
     await message.answer(text)
 
-# --- Бан/Разбан/Список заблокированных ---
+# --- Блокування ---
 @dp.message(Command("ban"))
 async def ban_command(message: types.Message):
     if message.from_user.id != OWNER_ID:
@@ -156,7 +164,7 @@ async def banned_command(message: types.Message):
     else:
         await message.reply("✅ Нет заблокированных пользователей.")
 
-# --- Обробка повідомлень ---
+# --- Обработка сообщений ---
 @dp.message()
 async def handle_messages(message: types.Message):
     user_id = message.from_user.id
@@ -186,7 +194,7 @@ async def handle_messages(message: types.Message):
 
         reply_map[sent.message_id] = user_id
 
-    # Відповідь адміна
+    # Адмін відповідає
     elif message.chat.id == ADMIN_CHAT_ID:
         if message.reply_to_message and message.reply_to_message.message_id in reply_map:
             user_id = reply_map[message.reply_to_message.message_id]
