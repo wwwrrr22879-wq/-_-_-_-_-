@@ -1,199 +1,224 @@
-import telebot
-from telebot import types
+# main.py
+import asyncio
 import json
-import time
-from datetime import datetime
+from datetime import datetime, time
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters import Command
+from flask import Flask
+import threading
+import os
 
-BOT_TOKEN = "8398382607:AAFYlAxCH0SuJBovS3v9FMxiphT06VIVUjM"
-ADMIN_GROUP_ID = 3205863933
-ADMIN_ID = 1470389051
+# 🔐 Ваші дані
+TOKEN = "8398382607:AAFYlAxCH0SuJBovS3v9FMxiphT06VIVUjM"
+ADMIN_CHAT_ID = 3205863933
+OWNER_ID = 1470389051
+DATA_FILE = "rewards_db.json"
 
-bot = telebot.TeleBot(BOT_TOKEN)
+bot = Bot(token=TOKEN)
+dp = Dispatcher()
 
-# Файлы хранений
-USERS_FILE = "users.json"
-BANNED_FILE = "banned.json"
+# 💬 Зв'язок повідомлення адміна ↔ користувач
+reply_map = {}
 
-def load_json(path):
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except:
-        return {}
+# 🚫 Заблоковані користувачі
+banned_users = set()
 
-def save_json(path, data):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+# 🏆 Нагороди
+if os.path.exists(DATA_FILE):
+    with open(DATA_FILE, "r") as f:
+        rewards_db = json.load(f)
+else:
+    rewards_db = {"users": {}}
 
-users = load_json(USERS_FILE)
-banned = load_json(BANNED_FILE)
+def save_db():
+    with open(DATA_FILE, "w") as f:
+        json.dump(rewards_db, f, indent=4)
 
+def check_rewards(user_id, message_time=None):
+    """Видача нагород користувачу"""
+    user = rewards_db["users"].setdefault(str(user_id), {"messages": 0, "rewards": []})
+    user["messages"] += 1
+    msg_count = user["messages"]
+    new_rewards = []
 
-# ----------------------------------------------------------
-# СИСТЕМА НАГРАД
-# ----------------------------------------------------------
-AWARDS = {
-    1: "🏅 Первая реплика",
-    10: "🎖 10 сообщений",
-    50: "🥇 50 сообщений",
-    100: "🏆 100 сообщений",
-    500: "💎 500 сообщений",
-    1000: "👑 1000 сообщений",
-}
+    # Перше повідомлення
+    if msg_count == 1 and "🏅 Первое сообщение" not in user["rewards"]:
+        user["rewards"].append("🏅 Первое сообщение")
+        new_rewards.append("🏅 Первое сообщение")
 
-SPECIAL_AWARDS = {
-    "night": "🌙 Ночная смена",
-    "long": "📜 Длинное сообщение",
-    "week": "⏳ 7 дней активности",
-    "first_photo": "📸 Первая фотография",
-    "1000_chars": "📚 1000 символов",
-    "streak_10": "🔥 Серия из 10 сообщений без перерыва"
-}
+    # За кількість повідомлень
+    milestones = {
+        10: "🎉 10 сообщений",
+        25: "🥳 25 сообщений",
+        50: "🎊 50 сообщений",
+        100: "🏆 100 сообщений",
+        250: "💎 250 сообщений",
+        500: "💎💎 500 сообщений",
+        1000: "🌟 1000 сообщений"
+    }
+    if msg_count in milestones and milestones[msg_count] not in user["rewards"]:
+        user["rewards"].append(milestones[msg_count])
+        new_rewards.append(milestones[msg_count])
 
+    # Нічна зміна
+    if message_time:
+        if time(22,0) <= message_time.time() or message_time.time() <= time(8,0):
+            if "🌙 Ночная смена" not in user["rewards"]:
+                user["rewards"].append("🌙 Ночная смена")
+                new_rewards.append("🌙 Ночная смена")
 
-def give_award(uid, award):
-    if award not in users[uid]["awards"]:
-        users[uid]["awards"].append(award)
-        save_json(USERS_FILE, users)
-        bot.send_message(uid, f"🔔 Ты получил награду: **{award}**")
+        # Спеціальні години
+        special_times = [
+            ("10:23", "⏰ Написал в 10:23"),
+            ("00:00", "🌌 Полночь сообщение"),
+            ("12:34", "🕐 Время 12:34"),
+            ("03:33", "🌓 Ночной момент 03:33"),
+            ("07:07", "🌅 Раннее утро 07:07")
+        ]
+        for t_str, reward_name in special_times:
+            t_hour, t_min = map(int, t_str.split(":"))
+            if message_time.time().hour == t_hour and message_time.time().minute == t_min:
+                if reward_name not in user["rewards"]:
+                    user["rewards"].append(reward_name)
+                    new_rewards.append(reward_name)
 
+    save_db()
+    return new_rewards
 
-# ----------------------------------------------------------
-# НАЧАЛО / START
-# ----------------------------------------------------------
-@bot.message_handler(commands=["start"])
-def start(msg):
-    uid = str(msg.from_user.id)
+# --- Клавіатура ---
+def main_keyboard():
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add("Мои награды")
+    return kb
 
-    if uid not in users:
-        users[uid] = {
-            "messages": 0,
-            "awards": [],
-            "first_time": time.time(),
-            "last_msg": 0,
-            "streak": 0
-        }
-        save_json(USERS_FILE, users)
-
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("✉ Написать сообщение", "🏆 Мои награды")
-
-    bot.send_message(uid,
-                     "👋 Приветствую! Я бот поддержки 'Шёпот Сердец'.\n\n"
-                     "📝 Ты можешь написать сюда любое сообщение, и администрация ответит тебе.\n"
-                     "👇 Нажми «Написать сообщение» чтобы начать.",
-                     reply_markup=markup)
-
-    give_award(uid, "🎉 Первая команда /start")
-
-
-# ----------------------------------------------------------
-# СИСТЕМА БАНА
-# ----------------------------------------------------------
-@bot.message_handler(commands=["ban"])
-def ban_user(msg):
-    if msg.from_user.id != ADMIN_ID:
+# --- Команди ---
+@dp.message(Command("start"))
+async def start_command(message: types.Message):
+    if message.from_user.id in banned_users:
         return
-    try:
-        uid = msg.text.split()[1]
-        banned[uid] = True
-        save_json(BANNED_FILE, banned)
-        bot.reply_to(msg, f"🚫 Пользователь {uid} заблокирован")
-    except:
-        bot.reply_to(msg, "❌ Использование: /ban ID")
+    await message.answer(
+        "✨ Привет!\n"
+        "Я — бот *Шепот Сердец 💌*\n"
+        "Напиши своё сообщение — и я передам его администрации.\n"
+        "Они обязательно ответят тебе лично. 🌟",
+        parse_mode="Markdown",
+        reply_markup=main_keyboard()
+    )
 
-
-@bot.message_handler(commands=["unban"])
-def unban_user(msg):
-    if msg.from_user.id != ADMIN_ID:
+# --- Перевірка нагород ---
+@dp.message(lambda m: m.text == "Мои награды")
+async def show_rewards(message: types.Message):
+    user_id = str(message.from_user.id)
+    user = rewards_db["users"].get(user_id)
+    if not user or not user.get("rewards"):
+        await message.answer("🏅 У вас пока нет наград.")
         return
-    try:
-        uid = msg.text.split()[1]
-        if uid in banned:
-            del banned[uid]
-            save_json(BANNED_FILE, banned)
-        bot.reply_to(msg, f"✅ Пользователь {uid} разблокирован")
-    except:
-        bot.reply_to(msg, "❌ Использование: /unban ID")
+    text = "🏆 Ваши награды:\n" + "\n".join(user["rewards"])
+    await message.answer(text)
 
-
-@bot.message_handler(commands=["banned"])
-def banned_list(msg):
-    if msg.from_user.id != ADMIN_ID:
+# --- Блокування ---
+@dp.message(Command("ban"))
+async def ban_command(message: types.Message):
+    if message.from_user.id != OWNER_ID:
+        await message.reply("❌ Только владелец может банить.")
         return
-    bot.reply_to(msg, "📍 Заблокированные:\n" + "\n".join(banned.keys()))
+    if not message.reply_to_message:
+        await message.reply("⚠️ Ответь на сообщение пользователя, которого хочешь забанить.")
+        return
+    user_id = reply_map.get(message.reply_to_message.message_id)
+    if not user_id:
+        await message.reply("⚠️ Не удалось определить пользователя.")
+        return
+    banned_users.add(user_id)
+    await message.reply(f"✅ Пользователь {user_id} заблокирован.")
 
+@dp.message(Command("unban"))
+async def unban_command(message: types.Message):
+    if message.from_user.id != OWNER_ID:
+        await message.reply("❌ Только владелец может разбанить.")
+        return
+    if not message.reply_to_message:
+        await message.reply("⚠️ Ответь на сообщение пользователя, которого хочешь разбанить.")
+        return
+    user_id = reply_map.get(message.reply_to_message.message_id)
+    if not user_id:
+        await message.reply("⚠️ Не удалось определить пользователя.")
+        return
+    banned_users.discard(user_id)
+    await message.reply(f"✅ Пользователь {user_id} разблокирован.")
 
-# ----------------------------------------------------------
-# НАГРАДЫ
-# ----------------------------------------------------------
-@bot.message_handler(func=lambda m: m.text == "🏆 Мои награды")
-def show_awards(msg):
-    uid = str(msg.from_user.id)
-    if not users[uid]["awards"]:
-        bot.send_message(uid, "🏅 У тебя пока нет наград 😢")
+@dp.message(Command("banned"))
+async def banned_command(message: types.Message):
+    if message.from_user.id != OWNER_ID:
+        await message.reply("❌ Только владелец может смотреть заблокированных.")
+        return
+    if banned_users:
+        await message.reply("🚫 Заблокированные пользователи:\n" + "\n".join(map(str, banned_users)))
     else:
-        bot.send_message(uid, "🏆 Твои награды:\n\n" + "\n".join(users[uid]["awards"]))
+        await message.reply("✅ Нет заблокированных пользователей.")
 
+# --- Обработка сообщений ---
+@dp.message()
+async def handle_messages(message: types.Message):
+    user_id = message.from_user.id
+    if user_id in banned_users:
+        return
 
-# ----------------------------------------------------------
-# ОСНОВНОЙ HANLDER ПЕРЕПИСКИ
-# ----------------------------------------------------------
-@bot.message_handler(content_types=["text", "photo", "voice", "video", "document"])
-def forward(msg):
-    uid = str(msg.from_user.id)
+    # Нагороди
+    check_rewards(user_id, datetime.now())
 
-    if uid in banned:
-        return bot.send_message(uid, "🚫 Ты заблокирован.")
+    # Пересилання адміну
+    if message.chat.id != ADMIN_CHAT_ID:
+        username = f"@{message.from_user.username}" if message.from_user.username else "без_юзернейма"
+        text = f"💬 Сообщение от {username} (ID: {user_id}):\n\n"
+        if message.text:
+            text += message.text
+            sent = await bot.send_message(ADMIN_CHAT_ID, text)
+        elif message.photo:
+            sent = await bot.send_photo(ADMIN_CHAT_ID, message.photo[-1].file_id, caption=text)
+        elif message.video:
+            sent = await bot.send_video(ADMIN_CHAT_ID, message.video.file_id, caption=text)
+        elif message.voice:
+            sent = await bot.send_voice(ADMIN_CHAT_ID, message.voice.file_id, caption=text)
+        elif message.document:
+            sent = await bot.send_document(ADMIN_CHAT_ID, message.document.file_id, caption=text)
+        else:
+            sent = await bot.send_message(ADMIN_CHAT_ID, text + "[неподдерживаемый тип]")
 
-    # Считаем сообщения
-    users[uid]["messages"] += 1
-    save_json(USERS_FILE, users)
+        reply_map[sent.message_id] = user_id
 
-    # Награды за количество
-    if users[uid]["messages"] in AWARDS:
-        give_award(uid, AWARDS[users[uid]["messages"]])
+    # Адмін відповідає
+    elif message.chat.id == ADMIN_CHAT_ID:
+        if message.reply_to_message and message.reply_to_message.message_id in reply_map:
+            user_id = reply_map[message.reply_to_message.message_id]
+            try:
+                if message.text:
+                    await bot.send_message(user_id, f"💌 Ответ администратора:\n\n{message.text}")
+                elif message.photo:
+                    await bot.send_photo(user_id, message.photo[-1].file_id, caption="💌 Ответ администратора")
+                elif message.video:
+                    await bot.send_video(user_id, message.video.file_id, caption="💌 Ответ администратора")
+                elif message.voice:
+                    await bot.send_voice(user_id, message.voice.file_id, caption="💌 Ответ администратора")
+                elif message.document:
+                    await bot.send_document(user_id, message.document.file_id, caption="💌 Ответ администратора")
+                else:
+                    await bot.send_message(user_id, "💌 Ответ администратора [неподдерживаемый тип]")
+            except:
+                await bot.send_message(ADMIN_CHAT_ID, f"⚠️ Пользователь {user_id} заблокировал бота.")
 
-    # Ночная награда
-    hour = datetime.now().hour
-    if 0 <= hour <= 5:
-        give_award(uid, SPECIAL_AWARDS["night"])
+# --- Flask для Keep Alive ---
+app = Flask("")
 
-    # Длинный текст
-    if msg.content_type == "text" and len(msg.text) > 300:
-        give_award(uid, SPECIAL_AWARDS["long"])
+@app.route("/")
+def home():
+    return "Bot is alive!"
 
-    # Фото
-    if msg.content_type == "photo":
-        give_award(uid, SPECIAL_AWARDS["first_photo"])
+def run():
+    app.run(host="0.0.0.0", port=8080)
 
-    # 1000 символов суммарно
-    if msg.content_type == "text":
-        if len(msg.text) >= 1000:
-            give_award(uid, SPECIAL_AWARDS["1000_chars"])
+threading.Thread(target=run).start()
 
-    # Пересылка в группу
-    bot.forward_message(ADMIN_GROUP_ID, msg.chat.id, msg.message_id)
-
-    # Ответ пользователю с уведомлением
-    bot.send_message(ADMIN_GROUP_ID,
-                     f"📩 Сообщение от @{msg.from_user.username} ({uid})")
-
-
-# ----------------------------------------------------------
-# Ответ администратора пользователю
-# ----------------------------------------------------------
-@bot.message_handler(func=lambda m: m.chat.id == ADMIN_GROUP_ID and m.reply_to_message)
-def admin_reply(msg):
-    text = msg.text
-    uid_line = msg.reply_to_message.text.split("(")[-1].replace(")", "")
-
-    try:
-        uid = int(uid_line)
-        bot.send_message(uid, f"💬 Администрация:\n{text}")
-    except:
-        pass
-
-
-print("BOT STARTED")
-bot.infinity_polling()
+# --- Запуск бота ---
+if __name__ == "__main__":
+    asyncio.run(dp.start_polling(bot))
