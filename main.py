@@ -1,84 +1,97 @@
 # main.py
-import asyncio, json, os
+import asyncio
+import json
+from datetime import datetime, time
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from flask import Flask
 import threading
-from datetime import datetime
+import os
 
-# ------------------ Твои данные ------------------
+# 🔐 Ваші дані
 TOKEN = "8398382607:AAFYlAxCH0SuJBovS3v9FMxiphT06VIVUjM"
-ADMIN_CHAT_ID = 3205863933  # сюда пересылаем сообщения
+ADMIN_CHAT_ID = 8398382607  # Основний адміністратор
 OWNER_ID = 1470389051
+DATA_FILE = "rewards_db.json"
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# ------------------ База наград ------------------
-if os.path.exists("rewards.json"):
-    with open("rewards.json", "r", encoding="utf-8") as f:
-        rewards_db = json.load(f)
-else:
-    rewards_db = {}
+# 💬 Зв'язок повідомлення адміна ↔ користувач
+reply_map = {}  # key: message_id адміна, value: user_id
 
-def save_rewards():
-    with open("rewards.json", "w", encoding="utf-8") as f:
-        json.dump(rewards_db, f, ensure_ascii=False, indent=2)
-
-# ------------------ Забаненные пользователи ------------------
+# 🚫 Заблоковані користувачі
 banned_users = set()
 
-# ------------------ Связка сообщений ------------------
-reply_map = {}  # key: message_id админа, value: user_id
+# 🏆 Нагороди
+if os.path.exists(DATA_FILE):
+    with open(DATA_FILE, "r") as f:
+        rewards_db = json.load(f)
+else:
+    rewards_db = {"users": {}}
 
-# ------------------ Клавиатура ------------------
+def save_db():
+    with open(DATA_FILE, "w") as f:
+        json.dump(rewards_db, f, indent=4)
+
+def check_rewards(user_id, message_time=None):
+    """Видача нагород користувачу"""
+    user = rewards_db["users"].setdefault(str(user_id), {"messages": 0, "rewards": []})
+    user["messages"] += 1
+    msg_count = user["messages"]
+    new_rewards = []
+
+    # Перше повідомлення
+    if msg_count == 1 and "Первое сообщение" not in user["rewards"]:
+        user["rewards"].append("🏅 Первое сообщение")
+        new_rewards.append("🏅 Первое сообщение")
+
+    # За кількість повідомлень
+    milestones = {
+        10: "🎉 10 сообщений",
+        25: "🥳 25 сообщений",
+        50: "🎊 50 сообщений",
+        100: "🏆 100 сообщений",
+        250: "💎 250 сообщений",
+        500: "💎💎 500 сообщений",
+        1000: "🌟 1000 сообщений"
+    }
+    if msg_count in milestones and milestones[msg_count] not in user["rewards"]:
+        user["rewards"].append(milestones[msg_count])
+        new_rewards.append(milestones[msg_count])
+
+    # Нічна зміна
+    if message_time:
+        if time(22,0) <= message_time.time() or message_time.time() <= time(8,0):
+            if "🌙 Ночная смена" not in user["rewards"]:
+                user["rewards"].append("🌙 Ночная смена")
+                new_rewards.append("🌙 Ночная смена")
+
+        # Спеціальні години
+        special_times = [("10:23", "⏰ Написал в 10:23"), ("00:00", "🌌 Полночь сообщение"), ("12:34", "🕐 Время 12:34")]
+        for t_str, reward_name in special_times:
+            t_hour, t_min = map(int, t_str.split(":"))
+            if message_time.time().hour == t_hour and message_time.time().minute == t_min:
+                if reward_name not in user["rewards"]:
+                    user["rewards"].append(reward_name)
+                    new_rewards.append(reward_name)
+
+    save_db()
+    return new_rewards
+
+# --- Клавіатура ---
 def main_keyboard():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add("Мои награды")
     return kb
 
-# ------------------ Награды ------------------
-def check_rewards(user_id):
-    user_id = str(user_id)
-    if user_id not in rewards_db:
-        rewards_db[user_id] = {"messages": 0, "rewards": []}
-    data = rewards_db[user_id]
-    data["messages"] += 1
-    new_rewards = []
-
-    # Награды за количество сообщений
-    if data["messages"] == 1:
-        new_rewards.append("Первое сообщение ✅")
-    if data["messages"] == 10:
-        new_rewards.append("10 сообщений 🎉")
-    if data["messages"] == 100:
-        new_rewards.append("100 сообщений 🏆")
-    if data["messages"] == 1000:
-        new_rewards.append("1000 сообщений 🌟")
-    
-    # Награды за ночную активность
-    hour = datetime.now().hour
-    if 22 <= hour or hour < 8 and "Ночная смена 🌙" not in data["rewards"]:
-        new_rewards.append("Ночная смена 🌙")
-    
-    # Секретные награды
-    now_time = datetime.now().strftime("%H:%M")
-    if now_time == "10:23" and "Секретная награда ⏰" not in data["rewards"]:
-        new_rewards.append("Секретная награда ⏰")
-
-    for r in new_rewards:
-        data["rewards"].append(r)
-
-    save_rewards()
-    return new_rewards
-
-# ------------------ Команды ------------------
+# --- Команди ---
 @dp.message(Command("start"))
 async def start_command(message: types.Message):
     if message.from_user.id in banned_users:
         return
     await message.answer(
-        "🌸 Привет, солнышко!\n"
+        "🌸 Привет, солнышко!\n\n"
         "Я — бот *Шепот сердец 💌*\n"
         "Напиши своё сообщение — и я передам его администраторам.\n"
         "Они обязательно ответят тебе с лучиком тепла ☀️",
@@ -86,13 +99,25 @@ async def start_command(message: types.Message):
         reply_markup=main_keyboard()
     )
 
+# --- Перевірка нагород ---
+@dp.message(lambda m: m.text == "Мои награды")
+async def show_rewards(message: types.Message):
+    user_id = str(message.from_user.id)
+    user = rewards_db["users"].get(user_id)
+    if not user or not user.get("rewards"):
+        await message.answer("🏅 У вас пока нет наград.")
+        return
+    text = "🏆 Ваши награды:\n" + "\n".join(user["rewards"])
+    await message.answer(text)
+
+# --- Блокування ---
 @dp.message(Command("ban"))
 async def ban_command(message: types.Message):
     if message.from_user.id != OWNER_ID:
         await message.reply("❌ Только владелец может банить.")
         return
     if not message.reply_to_message:
-        await message.reply("⚠️ Ответь на сообщение пользователя.")
+        await message.reply("⚠️ Ответь на сообщение пользователя, которого хочешь забанить.")
         return
     user_id = reply_map.get(message.reply_to_message.message_id)
     if not user_id:
@@ -107,7 +132,7 @@ async def unban_command(message: types.Message):
         await message.reply("❌ Только владелец может разбанить.")
         return
     if not message.reply_to_message:
-        await message.reply("⚠️ Ответь на сообщение пользователя.")
+        await message.reply("⚠️ Ответь на сообщение пользователя, которого хочешь разбанить.")
         return
     user_id = reply_map.get(message.reply_to_message.message_id)
     if not user_id:
@@ -126,32 +151,17 @@ async def banned_command(message: types.Message):
     else:
         await message.reply("✅ Нет заблокированных пользователей.")
 
-# ------------------ Кнопка Мои награды ------------------
-@dp.message(lambda m: m.text == "Мои награды")
-async def show_rewards(message: types.Message):
-    user_id = str(message.from_user.id)
-    user_data = rewards_db.get(user_id, {"rewards": []})
-    rewards_list = user_data["rewards"]
-    if rewards_list:
-        text = "🏆 Ваши награды:\n" + "\n".join(rewards_list)
-    else:
-        text = "⚠️ У вас пока нет наград."
-    await message.answer(text, reply_markup=main_keyboard())
-
-# ------------------ Обработка всех сообщений ------------------
-@dp.message(lambda m: True)
+# --- Обработка сообщений ---
+@dp.message()
 async def handle_messages(message: types.Message):
     user_id = message.from_user.id
     if user_id in banned_users:
         return
 
-    # Награды
-    new_rewards = check_rewards(user_id)
-    if new_rewards:
-        await message.answer("🎉 Вы получили новые награды:\n" + "\n".join(new_rewards),
-                             reply_markup=main_keyboard())
+    # Нагороди
+    check_rewards(user_id, datetime.now())
 
-    # Пересылка админу
+    # Пересилання адміну
     if message.chat.id != ADMIN_CHAT_ID:
         username = f"@{message.from_user.username}" if message.from_user.username else "без_юзернейма"
         text = f"💬 Сообщение от {username} (ID: {user_id}):\n\n"
@@ -171,7 +181,7 @@ async def handle_messages(message: types.Message):
 
         reply_map[sent.message_id] = user_id
 
-    # Ответ админу
+    # Адмін відповідає
     elif message.chat.id == ADMIN_CHAT_ID:
         if message.reply_to_message and message.reply_to_message.message_id in reply_map:
             user_id = reply_map[message.reply_to_message.message_id]
@@ -191,17 +201,18 @@ async def handle_messages(message: types.Message):
             except:
                 await bot.send_message(ADMIN_CHAT_ID, f"⚠️ Пользователь {user_id} заблокировал бота.")
 
-# ------------------ Flask Keep Alive ------------------
+# --- Flask для Keep Alive ---
 app = Flask("")
+
 @app.route("/")
 def home():
     return "Bot is alive!"
 
-def run_flask():
+def run():
     app.run(host="0.0.0.0", port=8080)
 
-threading.Thread(target=run_flask).start()
+threading.Thread(target=run).start()
 
-# ------------------ Запуск бота ------------------
+# --- Запуск бота ---
 if __name__ == "__main__":
-    asyncio.run(dp.start_polling(bot))
+    asyncio.run(dp.start_polling(bot))  
